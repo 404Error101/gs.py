@@ -170,15 +170,15 @@ local SharedGlobals = {
 }
 
 local Settings = {
-    hookOp = false,
+    hookOp = true,
     minifier = true,
     explore_funcs = true,
     lua = false,
     ipt = nil,
     discord = true,
     inf_loops = true,
-    runtimelogs = false,
-    constants = false,
+    runtimelogs = true,
+    constants = true,
     spyexeconly = false,
     roblox = false,
     isPremium = true,
