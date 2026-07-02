@@ -5,6 +5,7 @@ import time
 import pathlib
 import subprocess
 import threading
+import signal
 from datetime import datetime
 import aiohttp
 import discord
@@ -12,13 +13,14 @@ import socketserver
 import http.server
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
-CHANNEL_ID = 1520270151961018519
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID", 1520270151961018519))
 PREFIX = ".l"
 TIMEOUT = 180
 MAX_DL = 8 * 1024 * 1024
 
 ROOT = pathlib.Path(__file__).resolve().parent
-LUTE = ROOT / "lute.exe"
+# Use the correct binary name for Linux
+LUNE = ROOT / "lune"  # or just "lune" if in PATH
 TMP = ROOT / "bot_tmp"
 TMP.mkdir(exist_ok=True)
 
@@ -32,20 +34,41 @@ TIME_RE = re.compile(r"Finished processing in ([\d.]+) seconds", re.I)
 OK_EXT = (".lua", ".txt")
 
 def _kill_tree(pid: int):
-    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+    """Kill process tree for Linux"""
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        pass
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        pass
 
 def _dump_blocking(in_rel: str, out_rel: str):
     env = os.environ.copy()
-    env["HOOKOP_BIN"] = str(LUTE)
-    env["LUTE_MAX_STEPS"] = "15000000"
-    env["LUTE_MAX_DEPTH"] = "600"
+    # Use Lune with the correct environment variables
+    env["HOOKOP_USE_LUNE"] = "1"
+    env["HOOKOP_BIN"] = "lune"
+    env["LUNE_MAX_STEPS"] = "15000000"
+    env["LUNE_MAX_DEPTH"] = "600"
+    
     started = time.perf_counter()
+    
+    # Check if lune is available
+    lune_path = ROOT / "lune"
+    if not lune_path.exists():
+        lune_path = "/usr/bin/lune"
+    
     proc = subprocess.Popen(
         ["lune", "run", "main.luau", in_rel, f"out={out_rel}"],
-        cwd=str(ROOT), env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        cwd=str(ROOT), 
+        env=env,
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.STDOUT, 
+        text=True,
+        preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
     )
+    
     try:
         log, _ = proc.communicate(timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -55,27 +78,31 @@ def _dump_blocking(in_rel: str, out_rel: str):
         except Exception:
             pass
         return False, "timeout", TIMEOUT
+    
     took = time.perf_counter() - started
     m = TIME_RE.search(log or "")
     if m:
         took = float(m.group(1))
+    
     out_path = ROOT / out_rel
     if proc.returncode != 0 or not out_path.exists():
         tail = (log or "").strip().splitlines()[-10:] or ["unknown error"]
         error_msg = "\n".join(tail)[-400:]
         return False, error_msg, took
+    
     head = out_path.read_text(errors="ignore")[:6]
     if head.startswith("--err"):
         reason = out_path.read_text(errors="ignore")[5:].strip()
         return False, reason[:400] or "engine error", took
+    
     return True, None, took
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = discord.Client(intents=intents)
 
-queue: "asyncio.Queue[dict]" = asyncio.Queue()
-http_session: aiohttp.ClientSession | None = None
+queue = asyncio.Queue()
+http_session = None
 
 async def react(msg, emoji):
     try:
@@ -133,12 +160,15 @@ async def worker():
         in_rel = f"bot_tmp/{stamp}.lua"
         out_rel = f"bot_tmp/{stamp}_out.lua"
         in_path, out_path = ROOT / in_rel, ROOT / out_rel
+        
         await unreact(message, "🕓")
         await react(message, "⏳")
+        
         try:
             src = await fetch_source(job)
             in_path.write_text(src, encoding="utf-8", errors="ignore")
             ok, reason, took = await asyncio.to_thread(_dump_blocking, in_rel, out_rel)
+            
             if ok:
                 data = out_path.read_text(errors="ignore")
                 lines = data.count("\n") + 1
@@ -147,21 +177,27 @@ async def worker():
                 e.set_footer(text="99ms")
                 out_name = re.sub(r"\.(lua|txt)$", "", name, flags=re.I) + ".dump.lua"
                 with open(out_path, "rb") as fh:
-                    await message.reply(content=message.author.mention, embed=e, file=discord.File(fh, filename=out_name), mention_author=True)
+                    await message.reply(
+                        content=message.author.mention, 
+                        embed=e, 
+                        file=discord.File(fh, filename=out_name),
+                        mention_author=True
+                    )
                 await unreact(message, "⏳")
                 await react(message, "✅")
             else:
-                label = reason
-                color = WARN if "timeout" in reason else BAD
+                label = reason[:400] if reason else "unknown error"
+                color = WARN if "timeout" in label.lower() else BAD
                 e = discord.Embed(color=color, timestamp=datetime.now())
-                e.description = f"**`{name}`**\n{label}"
+                e.description = f"**`{name}`**\n```\n{label}\n```"
                 e.set_footer(text="99ms")
                 await message.reply(content=message.author.mention, embed=e, mention_author=True)
                 await unreact(message, "⏳")
-                await react(message, "⏱️" if "timeout" in reason else "❌")
+                await react(message, "⏱️" if "timeout" in label.lower() else "❌")
+                
         except Exception as ex:
             e = discord.Embed(color=BAD, timestamp=datetime.now())
-            e.description = f"**`{name}`**\ncouldn't grab that — {ex}"
+            e.description = f"**`{name}`**\ncouldn't process — {ex}"
             e.set_footer(text="99ms")
             try:
                 await message.reply(content=message.author.mention, embed=e, mention_author=True)
@@ -169,6 +205,7 @@ async def worker():
                 pass
             await unreact(message, "⏳")
             await react(message, "❌")
+            
         finally:
             for p in (in_path, out_path):
                 try:
@@ -183,7 +220,12 @@ async def on_ready():
     if http_session is None:
         http_session = aiohttp.ClientSession()
     bot.loop.create_task(worker())
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{PREFIX} · envlogger"))
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name=f"{PREFIX} · envlogger"
+        )
+    )
     print(f"online as {bot.user} · channel {CHANNEL_ID}")
 
 @bot.event
@@ -193,17 +235,23 @@ async def on_message(message):
     content = message.content.strip()
     if not (content == PREFIX or content.lower().startswith(PREFIX + " ") or content.lower().startswith(PREFIX + "\n")):
         return
+    
     jobs = await gather_jobs(message)
     if not jobs:
-        e = discord.Embed(color=ACCENT, description=f"attach a `.lua`/`.txt`, drop a raw link, or reply to one with `{PREFIX}`.")
+        e = discord.Embed(
+            color=ACCENT,
+            description=f"attach a `.lua`/`.txt`, drop a raw link, or reply to one with `{PREFIX}`."
+        )
         e.set_footer(text="99ms")
         await message.reply(embed=e, mention_author=False)
         return
+    
     await react(message, "🕓")
     pos = queue.qsize()
     for j in jobs:
         j["message"] = message
         await queue.put(j)
+    
     if pos or len(jobs) > 1:
         note = f"queued `{len(jobs)}` · `{pos}` ahead" if pos else f"queued `{len(jobs)}`"
         try:
@@ -225,5 +273,13 @@ def keep_alive():
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("DISCORD_TOKEN environment variable is not set!")
+    
+    # Verify lune exists
+    lune_path = ROOT / "lune"
+    if not lune_path.exists():
+        lune_path = pathlib.Path("/usr/bin/lune")
+        if not lune_path.exists():
+            print("WARNING: lune binary not found! Make sure it's installed.")
+    
     threading.Thread(target=keep_alive, daemon=True).start()
     bot.run(TOKEN)
