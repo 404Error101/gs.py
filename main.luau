@@ -65,7 +65,6 @@ local MAX_OPS_MUL = 1;
 local Instance = roblox.Instance
 
 local ExecutorEnvironment = {
-    -- Executor detection patterns
     ["Synapse X"] = "synapse",
     ["ScriptWare"] = "scriptware",
     ["Krnl"] = "krnl",
@@ -171,7 +170,7 @@ local SharedGlobals = {
 }
 
 local Settings = {
-    hookOp = false, -- Disabled by default to avoid exec format errors
+    hookOp = false,
     minifier = true,
     explore_funcs = true,
     lua = false,
@@ -429,7 +428,6 @@ local function HideErrors(text : string, hideLines : boolean?, clean : boolean?)
 end
 
 local function UseHookOp(Source : string, SourceFile : string?) : (boolean, string)
-    -- Skip hookOp if disabled or if we're on a platform with compatibility issues
     if not hookOp then
         return true, Source
     end
@@ -441,7 +439,7 @@ local function UseHookOp(Source : string, SourceFile : string?) : (boolean, stri
     end
 
     local OutPath = FileName .. "-unparsed.lua"
-    local ScriptPath = hookOp and "mods/hookOp.luau" or "mods/hookOpButNotReally.luau"
+    local ScriptPath = "mods/hookOp.luau"
     local HookArgs = {
         FileName,
         OutPath,
@@ -958,7 +956,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
     local function Comment(...)
         if true then return end
-
         Ast.addStatement(AST, Ast.Comment(unpack(TupleToAST(...))));
     end
 
@@ -1248,13 +1245,13 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         IsInternal or {}
                     )[1] :: { [string]: any };
 
-                    local Iterator =
-                        if Key == "next" then
-                            Ast.ArgList({ Ast.Variable(Key), ToAST(Self) })
-                        elseif typeof(Key) == "string" then
-                            Ast.FunctionCall(Ast.Variable(Key), {ToAST(Self)})
-                        else
-                            ToAST(Self)
+                    local Iterator
+                    if Key == "next" then
+                        Iterator = Ast.ArgList({ Ast.Variable(Key), ToAST(Self) })
+                    elseif typeof(Key) == "string" then
+                        Iterator = Ast.FunctionCall(Ast.Variable(Key), {ToAST(Self)})
+                    else
+                        Iterator = ToAST(Self)
                     end
 
                     CloseAllEnds(AST);
@@ -5277,7 +5274,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             table.clear(Node)
 
-            -- Copy everything from the function to here
             for j, v in ipairs(Explored) do
                 Node[j] = v
             end
