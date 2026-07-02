@@ -7,8 +7,7 @@ import subprocess
 from datetime import datetime
 import aiohttp
 import discord
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from aiohttp import web
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = 1520270151961018519
@@ -34,19 +33,23 @@ def _dump_blocking(in_rel: str, out_rel: str):
     env = os.environ.copy()
     env["HOOKOP_BIN"] = str(LUTE)
     started = time.perf_counter()
-    proc = subprocess.Popen(
-        ["lune", "run", "main.luau", in_rel, f"out={out_rel}"],
-        cwd=str(ROOT), env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-    )
     try:
+        proc = subprocess.Popen(
+            ["lune", "run", "main.luau", in_rel, f"out={out_rel}"],
+            cwd=str(ROOT), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
         log, _ = proc.communicate(timeout=TIMEOUT)
+    except FileNotFoundError:
+        return False, "lune command not found", 0
     except subprocess.TimeoutExpired:
         _kill_tree(proc.pid)
         try: proc.communicate(timeout=5)
         except Exception: pass
         return False, "timeout", TIMEOUT
+    except Exception as e:
+        return False, f"subprocess error: {e}", 0
     took = time.perf_counter() - started
     m = TIME_RE.search(log or "")
     if m:
@@ -60,16 +63,6 @@ def _dump_blocking(in_rel: str, out_rel: str):
         reason = out_path.read_text(errors="ignore")[5:].strip()
         return False, reason[:300] or "engine error", took
     return True, None, took
-
-class KeepAliveHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is alive!")
-
-def keep_alive():
-    server = HTTPServer(('0.0.0.0', 8080), KeepAliveHandler)
-    server.serve_forever()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -119,6 +112,17 @@ async def fetch_source(job) -> str:
                 raise ValueError("file too large")
             chunks.append(part)
         return b"".join(chunks).decode("utf-8", "ignore")
+
+async def keep_alive():
+    app = web.Application()
+    async def handle(request):
+        return web.Response(text="Bot is alive")
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    print("Keep-alive server running on port 8080")
 
 async def worker():
     await bot.wait_until_ready()
@@ -187,8 +191,9 @@ async def on_ready():
     if http is None:
         http = aiohttp.ClientSession()
     bot.loop.create_task(worker())
+    bot.loop.create_task(keep_alive())
     await bot.change_presence(activity=discord.Activity(
-        type=discord.ActivityType.watching, name=f"{PREFIX} · dumps"))
+        type=discord.ActivityType.watching, name=f"{PREFIX} · envlogger"))
     print(f"online as {bot.user} · channel {CHANNEL_ID}")
 
 @bot.event
@@ -218,6 +223,4 @@ async def on_message(message):
         except discord.HTTPException: pass
 
 if __name__ == "__main__":
-    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
-    keep_alive_thread.start()
     bot.run(TOKEN)
