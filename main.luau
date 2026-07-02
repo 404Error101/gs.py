@@ -64,7 +64,34 @@ local MAX_OPS_MUL = 1;
 
 local Instance = roblox.Instance
 
-local ExecutorEnvironment = require("./env/exec")
+local ExecutorEnvironment = {
+    -- Executor detection patterns
+    ["Synapse X"] = "synapse",
+    ["ScriptWare"] = "scriptware",
+    ["Krnl"] = "krnl",
+    ["Vega X"] = "vega",
+    ["Fluxus"] = "fluxus",
+    ["Electron"] = "electron",
+    ["Hydrogen"] = "hydrogen",
+    ["Delta"] = "delta",
+    ["Arceus X"] = "arceus",
+    ["ScriptBlox"] = "scriptblox",
+    ["Calamari"] = "calamari",
+    ["Sirius"] = "sirius",
+    ["Comet"] = "comet",
+    ["Valyse"] = "valyse",
+    ["Seliware"] = "seliware",
+    ["Cryptic"] = "cryptic",
+    ["AWP"] = "awp",
+    ["Elysian"] = "elysian",
+    ["Oxygen U"] = "oxygen",
+    ["Skid"] = "skid",
+    ["MacOS"] = "macos",
+    ["Android"] = "android",
+    ["iOS"] = "ios",
+    ["Windows"] = "windows",
+}
+
 local RandomLib = require("./env/random")
 local DateTime = require("./env/datetime")
 local InstanceLib, InstanceFuncs = unpack(require("./env/instances"))
@@ -74,7 +101,7 @@ local GetTerrainMaterialColor = require("./env/terrain")
 local Services = {} :: { [string]: { [any]: any } }
 local Predefined = {} :: { [any]: any }
 local Deferred = {} :: { func }
-local IteratorTypes = {} :: { [string]: { any } } -- for example, ["game"] = { number, Instance }
+local IteratorTypes = {} :: { [string]: { any } }
 local AliasToName = {
     int64 = "number",
     double = "number",
@@ -85,7 +112,6 @@ local Lengths = {} :: { [Spied]: number }
 local Illegal = {
     ["for"] = true,
     ["end"] = true,
-    -- ... other keywords
 }
 
 for Key, Data in next, InstanceLib do
@@ -93,12 +119,6 @@ for Key, Data in next, InstanceLib do
         Services[Key] = Data
     end
 end
-
---[[
-local process = require("@lune/process")
-local roblox = {};
-local serde = require("@lune/serde")
-local net = require("@lune/net")]]
 
 local min, max = math.min, math.max
 local insert, pack, find, concat, isfrozen = table.insert, table.pack, table.find, table.concat, table.isfrozen;
@@ -141,7 +161,7 @@ local SharedGlobals = {
         game = true, workspace = true, task = true, CFrame = true, spawn = true
     },
     Pristine = false,
-    Logs = {}, --> print & warn & others
+    Logs = {},
     Callbacks = {},
     Deferred = {},
     Delay = 0,
@@ -151,7 +171,7 @@ local SharedGlobals = {
 }
 
 local Settings = {
-    hookOp = true,
+    hookOp = false, -- Disabled by default to avoid exec format errors
     minifier = true,
     explore_funcs = true,
     lua = false,
@@ -160,7 +180,7 @@ local Settings = {
     inf_loops = true,
     runtimelogs = false,
     constants = false,
-    spyexeconly = false, --> implement latar
+    spyexeconly = false,
     roblox = false,
     isPremium = true,
     type_annotations = false
@@ -178,7 +198,7 @@ end
 
 for index, arg in process.args do
     local k, v = match(arg, "([%w_]+)=(.+)")
-    local Arg = arg -- remove --
+    local Arg = arg
 
     if not k and Settings[arg] == nil and not Settings.ipt then
         Settings.ipt = arg
@@ -192,7 +212,7 @@ for index, arg in process.args do
         continue
     end
 
-    if v then -- version=, outfile =
+    if v then
         Settings[k] = StrToValue(v)
     else
         local neg = sub(Arg, 1, 1)
@@ -264,7 +284,6 @@ local function GetVar() : string
 end
 
 local function GetCount(Var : string, AddAnyway : boolean?) : string
-    --> Returns the formatted variable name with _(x) where x is how many times it's been used.
     Usages[Var] = (Usages[Var] or -1) + 1
     local Use = Usages[Var]
     if Use == 0 and not AddAnyway then return Var end
@@ -273,19 +292,6 @@ local function GetCount(Var : string, AddAnyway : boolean?) : string
 end
 
 local function GetInternalValue(Spied : any, Recursed : boolean?) : any
-    --[[
-        Internal: {
-            r1: { 1 }
-        }
-
-        GetInternalValue(r1) -> Internal.r1 -> Internal.r1[1] is spied? no then return
-
-        Internal: {
-            r1: { game },
-        }
-
-        GetInternalValue(r1) -> Internal.r1 -> Internal.r1[1] is spied? yes then check if that has an internal value, if yes then return GetInternalValue(val) otherwise return self.
-    ]]
     local Value = Internal[Variables[Spied]];
     if Value then
         local V1 = Value[1]
@@ -330,7 +336,6 @@ local function GetParams(Value : (any) -> any, Infos : { any }?) : { string }
     end
 
     for i = 1, 3 do
-        --insert(Params, "ext_p" .. i .. Suffix)
         insert(Params, Alphabet[i] .. Suffix)
     end
 
@@ -364,12 +369,6 @@ local function Function(Callback, Path, IsCClosure)
         CClosures[Callback] = true
     end
 
-    --[[local Result = Callback;
-
-    Callback = function(...)
-        return Result(...)
-    end]]
-
     Variables[Callback] = Path
     ReverseVariables[Path] = Callback
     Types[Callback] = "function"
@@ -378,8 +377,7 @@ local function Function(Callback, Path, IsCClosure)
 end
 
 local function thread(func : func)
-    -- how do we create a thread..?
-    return coroutine.create(func); -- :sob::sob::sob::sob::sob:
+    return coroutine.create(func);
 end
 
 local function isUnsafePattern(p)
@@ -420,7 +418,6 @@ local function HideErrors(text : string, hideLines : boolean?, clean : boolean?)
     text = text:gsub(
         UserRegex,
         format("%s%s", "%1", hideLines and "" or ":%2")
-        --format("[string \"%s\"]%s", TraceId, hideLines and "" or ":%1")
     )
     if not hideLines then
         text = text:gsub(":%d+:", ":1:")
@@ -432,6 +429,11 @@ local function HideErrors(text : string, hideLines : boolean?, clean : boolean?)
 end
 
 local function UseHookOp(Source : string, SourceFile : string?) : (boolean, string)
+    -- Skip hookOp if disabled or if we're on a platform with compatibility issues
+    if not hookOp then
+        return true, Source
+    end
+
     local FileName = SourceFile;
     if not FileName then
         FileName = "./cache/" .. GenId(8)
@@ -444,13 +446,11 @@ local function UseHookOp(Source : string, SourceFile : string?) : (boolean, stri
         FileName,
         OutPath,
         CallId,
-        --        Obfuscator == "Luraph" and "0" or Settings.constants and "1" or "0",
         Settings.constants and "1" or "0",
         Settings.inf_loops and "1" or "0",
         tostring(WHILE_LIMIT),
     }
 
-    -- Prefer Lute for @std/syntax/parser; allow explicit override.
     local HookBin = process.env and process.env.HOOKOP_BIN
     local UseLune = process.env and process.env.HOOKOP_USE_LUNE
     if not HookBin then
@@ -491,8 +491,6 @@ local function UseHookOp(Source : string, SourceFile : string?) : (boolean, stri
 end
 
 local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
-    --> Environment logs the given file & outputs the code
-
     local function GetMaxOps(n) return 5000 / max(n * 5, 1) * MAX_OPS_MUL end
 
     Nest = Nest or 0;
@@ -554,7 +552,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     end
 
     local function checktype(obj : any, expected : string, msg : string, allowNn : boolean?) : any
-        if allowNn and not Internal[Variables[obj]] then return obj end --> has no value..?
+        if allowNn and not Internal[Variables[obj]] then return obj end
 
         local type, int = Typeof(obj)
         assert(type == expected, `{msg}, {expected} expected got {type}`)
@@ -580,15 +578,15 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         string = true
     }
     local Nil = {
-        getconstants = true, -- msec
-        _ENV = true, --> executor thing
+        getconstants = true,
+        _ENV = true,
         io = true,
         file = true
     }
     local ForceNil = {
         RandomStrings = true,
         package = true,
-        inf = true, --> uuuuuuuuh wearedevs
+        inf = true,
     }
     local Indexes = {}
     local SecureEnv = {} :: Environment
@@ -668,10 +666,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             local node = Ast.Variable(id)
 
             insert(ToExplore, { func = Func, id = id, node = node, args = Options, idx = #ToExplore, traceback = debug.traceback() })
-            --local node = Ast.Block({})
-            --Ast.addStatement(node, Ast.Comment(Ast.RawText("Unexplored function..")))
-            --insert(ToExplore, { func = Func, node = node, args = Options, idx = #ToExplore })
-            --ToExploreHash[Func] = { id, Options }
             ToExploreHash[Func] = true
 
             return node;
@@ -700,15 +694,12 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
         local Gotten = {};
 
-        if not Params--[[ and (Nest ~= 2 or not Options.as_pcall)]] and (Nest ~= 1 or not Options.as_pcall) then -- spy them
+        if not Params and (Nest ~= 1 or not Options.as_pcall) then
             Gotten = GetParams(Func, ParamInfos)
             Params = SpyParams(Gotten, ParamInfos)
         end
 
-        --local Results = pack(pcall(if Options.as_pcall or true then Func else fenv.setfenv(Func, Env), unpack(Params or {})))
-        --local IsRegular = getfenv(Func)
         local Results = pack(pcall(Func, unpack(Params or {})))
-        --local Results = pack(pcall(if IsRegular == Env or Options.as_pcall then Func else setfenv(Func, Env), unpack(Params or {})))
         local Logged = Ast.Block{};
 
         for _, Statement in next, AST.data.statements do
@@ -727,14 +718,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 if Last and Last.kind == "call" and Last.data.func.data.name == "error" then
                 else
                     local Error = Results[2]
-                    --[[Ast.addStatement(Logged, Ast.FunctionCall(
-                        Ast.Variable("error"), {
-                            ToAST(
-                                if Settings.debug then Error else HideErrors(Error, not IsTesting)
-                            )
-                        })
-                    )]]
-                    
                     Ast.addStatement(
                         Logged,
                         Ast.NonOptionalComment(
@@ -766,17 +749,13 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     end
 
     local function shallowEqual(t1, t2)
-        -- If they are the same table, they are equal
         if t1 == t2 then return true end
-        -- If either isn't a table, they aren't equal
         if type(t1) ~= "table" or type(t2) ~= "table" then return false end
     
-        -- Check if t1 keys/values exist in t2
         for k, v in pairs(t1) do
             if t2[k] ~= v then return false end
         end
     
-        -- Check if t2 has extra keys not in t1
         for k, _ in pairs(t2) do
             if t1[k] == nil then return false end
         end
@@ -806,19 +785,16 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             return ToAST(Meow);
         elseif Type == "nil" then
             return Ast.Nil(Value)
-        elseif Type == "function" then -- ono..
+        elseif Type == "function" then
             local Old = Functions[Value]
             if Old and not (Data and Data.dont_cache) and (not Data or shallowEqual(Data, Old[2])) then return Old[1] end
 
             Data = if typeof(Data) == "table" then Data else {}
             Data.bypass_beautify = if Data.bypass_beautify == nil then false else Data.bypass_beautify
 
-            -- Since the function is STILL attached to this Env, We can just log the new nodes.
-
             local Logged = Explore(Value, Data);
             
             Functions[Value] = { Logged, Data }
-            --return Ast.Function(GetParams(Value), Logged)
             return Logged;
         elseif Type == "table" then
             if VisitedTables[Value] then
@@ -874,7 +850,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             end
 
             VisitedTables[Value] = nil;
-            --Variables[Value] = TblVar.data.name;
 
             return TblVar;
         elseif Type == "boolean" then
@@ -948,9 +923,9 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         return Var, Stat
     end
 
-    local function AppendCall(FuncName : string, ...) : (string, AstExpression) --> Returns variable name
+    local function AppendCall(FuncName : string, ...) : (string, AstExpression)
         OpCountCheck();
-        local Value = VarValues[FuncName] -- The function's value, we use this to construct namecalls.
+        local Value = VarValues[FuncName]
         if Value and Value.kind == "index" then
             local ValueBase = Value.data.base
             if ValueBase.kind == "variable" then
@@ -958,11 +933,11 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 local FirstArg = Variables[...]
                 local MethodInfo = VarValues[FuncName]
 
-                if Name == FirstArg and (MethodInfo and MethodInfo.kind == "index") then --> Namecall
-                    local Key = MethodInfo.data.key--.data.value
+                if Name == FirstArg and (MethodInfo and MethodInfo.kind == "index") then
+                    local Key = MethodInfo.data.key
                     local KeyVar = Key.data.value
                     if Key.kind == "variable" then
-                        KeyVar = VarValues[MethodInfo.data.key.data.name].data.value --> Other constant?
+                        KeyVar = VarValues[MethodInfo.data.key.data.name].data.value
                     elseif Key.kind == "string" then
                         KeyVar = Key.data.value
                     end
@@ -1012,21 +987,21 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
     MathV2 = {
         __eq = "==",
-	    __neq = "~=",
-	    __lt = "<",
-	    __le = "<=",
-	    __gt = ">",
-	    __ge = ">=",
+        __neq = "~=",
+        __lt = "<",
+        __le = "<=",
+        __gt = ">",
+        __ge = ">=",
     }
     Math = {
-	    __add = "+",
-	    __sub = "-",
-	    __mul = "*",
-	    __div = "/",
-	    __idiv = "//",
-	    __pow = "^",
+        __add = "+",
+        __sub = "-",
+        __mul = "*",
+        __div = "/",
+        __idiv = "//",
+        __pow = "^",
         __mod = "%",
-	    __concat = ".."
+        __concat = ".."
     }
 
     local SymbolToName = ReverseDict(Math)
@@ -1057,13 +1032,12 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         local args = { ... }
         local len = select("#", ...)
 
-        if len == 2 and args[1] == nil then --> heh iter
-            if args[2] == nil then -- started the iteration, when its not nil then its done
+        if len == 2 and args[1] == nil then
+            if args[2] == nil then
                 CloseAllEnds(AST);
 
                 Iters[Path] = true
 
-                -- its an iterator thing
                 local i, v = GetCount("i"), GetCount("v")
 
                 Ast.addStatement(
@@ -1095,28 +1069,27 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
     function GetValueInner(x, Symbol, y)
         if Symbol == "+" then return x + y
-	    elseif Symbol == "-" then return x - y
-	    elseif Symbol == "*" then return x * y
-	    elseif Symbol == "/" then return x / y
-	    elseif Symbol == "//" then return x // y
-	    elseif Symbol == "^" then return x ^ y
+        elseif Symbol == "-" then return x - y
+        elseif Symbol == "*" then return x * y
+        elseif Symbol == "/" then return x / y
+        elseif Symbol == "//" then return x // y
+        elseif Symbol == "^" then return x ^ y
         elseif Symbol == "%" then return x % y
-	    elseif Symbol == ".." then return x .. y
-	    elseif Symbol == "==" then return rawequal(x, y)
-	    elseif Symbol == "~=" then return not rawequal(x, y)
-	    elseif Symbol == "<" then return x < y
-    	elseif Symbol == "<=" then return x <= y
-	    elseif Symbol == ">" then return x > y
-	    elseif Symbol == ">=" then return x >= y
+        elseif Symbol == ".." then return x .. y
+        elseif Symbol == "==" then return rawequal(x, y)
+        elseif Symbol == "~=" then return not rawequal(x, y)
+        elseif Symbol == "<" then return x < y
+        elseif Symbol == "<=" then return x <= y
+        elseif Symbol == ">" then return x > y
+        elseif Symbol == ">=" then return x >= y
         end
     end
 
     function Spy(Path : string, Value : any, Info: any) : any
-        --if Variables[Value] then return Value end
         assert(typeof(Path) == "string", `invalid argument #1 to 'Spy', string expected got {typeof(Path)} - {debuginfo(2, "l")}, {debuginfo(3, "l")}`)
 
         local Reversed = ReverseVariables[Path]
-        if Reversed then return Reversed end -- Dont log duplicates.
+        if Reversed then return Reversed end
 
         if not Metatable then
             local Info = Info or {};
@@ -1131,7 +1104,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                 local Cached = (Internal[Path] or {{}})[1] :: { [string]: any };
 
-                if rawequal(Cached, Env) then Cached[Key] = Value return end --> Stop meowing pal
+                if rawequal(Cached, Env) then Cached[Key] = Value return end
 
                 local Type = Typeof(Cached)
                 local DontSet = Info.from_index and Cached == nil;
@@ -1175,15 +1148,13 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     IsInternal or {}
                 )[1] :: { [string]: any };
 
-                if rawequal(Cached, Env) then return Cached[Key] end --> Stop meowing pal
+                if rawequal(Cached, Env) then return Cached[Key] end
 
                 local DontCache = Variables[Cached] ~= nil or Cached == nil;
 
                 Cached = Cached or {}
 
                 local Type = Typeof(Cached)
-
-                --if Type ~= "table" and LuauTypes[Type] then Cached = {} end
 
                 if Type == "Enum" then
                     local EnumKey = tostring(Cached):split(".")[2]
@@ -1194,7 +1165,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         DontCache = typeof(Key) == "table"
                     end
                 elseif Type == "Instance" then
-                    DontCache = not pcall(function() return Cached[Key] end) --> ??!?!?!?!
+                    DontCache = not pcall(function() return Cached[Key] end)
                 end
 
                 local Cache =
@@ -1212,7 +1183,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 do
                     local meow = Info.indexed_instance
                     if meow ~= nil then newinfo.indexed_instance = meow end
-                    newinfo.from_index = true--DontCache
+                    newinfo.from_index = true
                 end
 
                 if LuaTypes[Type] and Type ~= "table" and Type ~= "string" then
@@ -1261,7 +1232,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 local Ends = WaitingIfs
                 local Current = ForLoopId + 1
 
-                return function(...) --> nil, nil;
+                return function(...)
                     if Called then
                         ActiveLoops -= 1
                         CloseIfs()
@@ -1284,6 +1255,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                             Ast.FunctionCall(Ast.Variable(Key), {ToAST(Self)})
                         else
                             ToAST(Self)
+                    end
 
                     CloseAllEnds(AST);
 
@@ -1322,11 +1294,11 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             local HookOpHas = {
                 __eq = true,
-	            __neq = true,
-	            __lt = true,
-	            __le = true,
-	            __gt = true,
-	            __ge = true
+                __neq = true,
+                __lt = true,
+                __le = true,
+                __gt = true,
+                __ge = true
             }
 
             local InstantlyProcess = { ["=="] = true, ["~="] = true }
@@ -1342,18 +1314,16 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                 if not InstantlyProcess[Symbol] then
                     if Symbol == ".." then
-                        --> We can't process it otherwise it'll keep calling this..?
                         if VarX or VarY then
-                            if TypeX ~= "string" and TypeY ~= "string" then --> Drawing .. "meow" will be ignored i guess
+                            if TypeX ~= "string" and TypeY ~= "string" then
                                 assert(not Settings.roblox, `attempt to concatenate {TypeX} with {TypeY}`)
                             end
                             return TypeSpy(Var, "string");
                         end
-                    else --> Add, Sub, Mul, ...
+                    else
                         if VarX or VarY then
-                            --> uhhhhhhhhhhhhhhh whattttt?
-                            if (not xLune and not yLune) or ((VarX and not xLune) or (VarY and not yLune)) then --> both arent lune, x is spied & not lune, y is spied & not lune
-                                if not LuaTypes[TypeX] and not LuaTypes[TypeY] then --> not a number, function, string, ...
+                            if (not xLune and not yLune) or ((VarX and not xLune) or (VarY and not yLune)) then
+                                if not LuaTypes[TypeX] and not LuaTypes[TypeY] then
                                     assert(not Settings.roblox, `attempt to perform arithmetic ({SymbolToName[Symbol]:sub(3)}) on {TypeX} and {TypeY}`)
                                 end
                                 return Spy(Var);
@@ -1366,7 +1336,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 if Settings.roblox then
                     assert(Success, tostring(Value))
                 end
-	            return Value
+                return Value
             end
 
             for Method, Symbol in next, Math do
@@ -1390,10 +1360,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             if not hookOp then
                 for Method, Symbol in next, MathV2 do
-                    --[[if HookOpHas[Method] then
-                        continue;
-                    end]]
-
                     Metatable[Method] = function(Self, Value)
                         if Variables[Self] == EnvName then
                             return GetValue(GetInternalValue(Self), Symbol, GetInternalValue(Value))
@@ -1418,15 +1384,15 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             local OldMt = getmetatable(Value)
             local ActualMetatable = getmetatable(Meta)
 
-            if OldMt then --> Support for the Random library, since the stuff it returns has metatables:(
+            if OldMt then
                 for method, callback in next, OldMt do
                     if typeof(callback) == "function" then
-                        if method:sub(1, 2) == "__" then -- metamethod
+                        if method:sub(1, 2) == "__" then
                             ActualMetatable[method] = callback
                         else
                             rawset(Meta, method, function(_, ...)
                                 local Statement;
-                                if Variables[_] == Path then -- namecall duh
+                                if Variables[_] == Path then
                                     Statement = Ast.Assign(
                                         { Ast.Variable(GetVar()) },
                                         { Ast.Namecall(Ast.Variable(Path), Ast.Variable(method), TupleToAST(...)) }
@@ -1496,8 +1462,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     function SafeValue(Var : string, Value : any, Info : any) : any
         local Type = Typeof(Value)
 
-        --if Type == "Instance" then return Value end -- instances are already sandboxed
-
         if Type == "function" then
             return Function(Value, Var, iscclosure(Value))
         elseif Type == "table" or hookOp then
@@ -1556,9 +1520,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     end
 
     if hookOp then
-        -- add the funcs:(
-
-        local StuffThatRanEq = {} -- Storing their variable name is more efficient right?
+        local StuffThatRanEq = {}
 
         local function Eq(Symbol)
             local IsEq = Symbol == "=="
@@ -1572,24 +1534,10 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 end
             end
 
-            --> if N[2] then
-
-            --[[
-                Values:
-                N[2] and ==: not N
-                N[2] and ~=: N
-
-                not N[2] and ==: N
-                not N[2] and ~=: not n
-            ]]
-
             return function(x, y)
                 local A, B = GetContext(x), GetContext(y);
-                if (not A and not B)--[[ or (Typeof(x) == "function" or Typeof(y) == "function")]] or (IgnoreInEq[A] or IgnoreInEq[B]) then return eq(x, y) end
+                if (not A and not B) or (IgnoreInEq[A] or IgnoreInEq[B]) then return eq(x, y) end
                 local N, P = StuffThatRanEq[A], StuffThatRanEq[B]
-
-                --if N then return WhatIsIt(N) end
-                --if P then return WhatIsIt(P) end
 
                 local X, Y = GetInternalValue(x), GetInternalValue(y);
                 local Var = GetVar()
@@ -1606,7 +1554,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 local VarX = Variables[X]
 
                 if VarX and (VarX == Variables[Y]) then
-                    RawValue = IsEq; --> gethui() ~= gethui() or something
+                    RawValue = IsEq;
                 end
 
                 local InfoA = Information[x]
@@ -1625,11 +1573,10 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                             Value = IsEq
                         end
                     else
-                        Value = eq(TypeX, TypeY) --> If they're the same type
+                        Value = eq(TypeX, TypeY)
                     end
                 end
 
-                -- blah blah blah
                 if Value == nil then
                     Value = RawValue;
                 end
@@ -1680,7 +1627,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         end
 
         local function SearchTable(tbl : { [any]: any }) : boolean
-            --> Searches through a table and returns should spy log
             local Junk, Count = 0, 0;
             local IsDict = #tbl == 0;
 
@@ -1700,7 +1646,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     return false
                 elseif Type == "number" then
                     Junk += 1
-                elseif Type == "table" then --> It cant be a variable, we already checked that before.
+                elseif Type == "table" then
                     Junk += 5
                 elseif Type == "string" then
                     Junk += (IsGarbageString(val) and 10 or -5)
@@ -1718,7 +1664,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 and function(x, y) return x and y end
                 or function(x, y) return x or y end; 
 
-            return function(x, y, isYFunc, ...) --> Lhs, Rhs, { isFunction, isFunction }
+            return function(x, y, isYFunc, ...)
                 local a, b = GetContext(x), GetContext(y)
                 local _x, _y = x, y;
 
@@ -1737,7 +1683,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 end
 
                 if ShouldReturn then
-                    if (a or b) and TypeX ~= "number" and TypeX ~= "Instance"--[[ and (IsAnd and X ~= false)]] then --> some weird ib1 shit idk
+                    if (a or b) and TypeX ~= "number" and TypeX ~= "Instance" then
                         if Variables[X] == EnvName or y == nil then return X end
 
                         local IsPrometheus = typeof(y) == "number" and y > 10000
@@ -1751,14 +1697,14 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                             if X == false then
                                 local Val = VarValues[a]
-                                if not Val or Val.kind ~= "unary" then --> Log (if not x)
+                                if not Val or Val.kind ~= "unary" then
                                     return X
                                 end
                             end
                             Var = Def(x, Symbol, y, _y, isYFunc)
                         else
                             local ToAST_X = ToAST(x)
-                            Var = DefineVar(X and ToAST_X or Ast.UnaryOp(ToAST_X, "not")) -- remove the ugly 'x and 123456'
+                            Var = DefineVar(X and ToAST_X or Ast.UnaryOp(ToAST_X, "not"))
                         end
 
                         SetInternalValue(Var, X);
@@ -1773,8 +1719,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     y = y(...)
                 end
 
-                if (not a and not b) or (IsFunction or CompIgnore[a]) then --> Ignore
-                    --> Simplified: if not a and not b ORRRRR if X isn't a function (and not `string`)
+                if (not a and not b) or (IsFunction or CompIgnore[a]) then
                     return GetValue(X, y)
                 end
 
@@ -1787,7 +1732,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 if CompVars[X] then
                     CompVars[y] = `not {CompVars[X]}`
                 elseif not IsPrometheus then
-                    if IsFunction and iscclosure(x) then --> C function, like print or string.something
+                    if IsFunction and iscclosure(x) then
                         return GetValue(x, y);
                     end
                     
@@ -1827,7 +1772,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             ["nil"] = true
         }
 
-        local LastCondition, LastConditionV2 = nil, nil; --> use for infinite while detection?
+        local LastCondition, LastConditionV2 = nil, nil;
 
         function SecureEnv.GET(text : any, ...)
             local Type = typeof(text)
@@ -1857,28 +1802,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 not IsBetween(Len, 13, 15) and
                 not text:find("[\1-\30\133-\255]")
             then
-                local PreviousString = text:sub(1, -2) --> This file -> This fil
-
-                --[[if Previous then --> actually used constant!
-                    Previous.data.values, Previous.data.vars = {}, {};
-
-                    Strings[PreviousString] = nil;
-                    ConstantList[PreviousString] = nil;
-
-                    local Var = GetVar()
-
-                    Strings[text] = Var
-                    ConstantList[text] = Define(
-                        Ast.Variable(Var),
-                        Ast.String(text),
-                        false,
-                        true
-                    )
-                else
-                    Strings[text] = DefineVar(Ast.String(text))
-                end]]
-
-                --Strings[PreviousString] = nil
                 local Var, Stat = DefineVar(Ast.String(text))
 
                 ConstantList[text] = Stat
@@ -1926,7 +1849,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             if typeof(func) ~= "function" then
                 local var = Variables[func]
-                if var and LuaTypes[Typeof(func)] then --> Not a custom type (Like game, Enum, ...)
+                if var and LuaTypes[Typeof(func)] then
                     return __call(func, ...);
                 end
             end
@@ -1987,7 +1910,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                 OpCountCheck();
 
-                insert(WaitingIfs, { _Condition, #AST.data.statements, not WillRun and HasElse, HasElse, IfId }) --> In a for loop, The last statement is the forprep.
+                insert(WaitingIfs, { _Condition, #AST.data.statements, not WillRun and HasElse, HasElse, IfId })
                 return WillRun;
             end
 
@@ -2001,7 +1924,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             if Len == 0 then return end
 
             local Oldest = WaitingIfs[Len]
-            if Oldest[2] == LengthNow--[[ or Last == Oldest]] then return end -- THIS WORKS???? :sob:
+            if Oldest[2] == LengthNow then return end
 
             local LastStat = AST.data.statements[LengthNow]
             if LastStat.kind == "assign" and LastStat.data.values[1].kind == "index" then return end
@@ -2025,8 +1948,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     AST,
                     Ast.IfStat(
                         ToAST(Oldest[1]),
-                        Body--,
-                        --Oldest[4] and Ast.Block{} or nil
+                        Body
                     )
                 )
             end
@@ -2041,8 +1963,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             if Var then
                 if Indexes[Var] then
-                    --AlwaysIgnore[Var] = true
-                    --SetInternalValue(Var, nil)
                     return nil;
                 end
             end
@@ -2057,30 +1977,21 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             local Stats = AST.data.statements
             local Len = #Stats
 
-            --[[
-                CHECKWHILE(true, 1) -> print("sh3b el noni") -> do nothing
-                CHECKWHILE(true, 1) -> print("bel sha7at") -> do nothing
-                CHECKWHILE(true, 1) -> print("sh3b el noni") -> REMOVE THIS!!!!!!!!!! AND STOP LOGGING
-            ]]
-
             if Len ~= LastLen and Settings.inf_loops and false then
                 local Exprs = WhileExprs[id] or {}
 
                 local Stat = Stats[Len]
 
-                --if Stat.kind == "assign" then Stat = Stat.data.values[1] end
                 if Stat.kind == "assign" and Stat.data.values[1].kind == "index" then
                     WhileExprs[id] = {}
                 elseif Stat.kind == "variable" then
                 else
-                    --> Len - LastLen = 2
-
                     local meower = AstLib.ExprToCode(Stat, 0, true)
                     for n, expr in next, Exprs do
                         if expr[1] == meower then
                             if expr[3] <= 10 then
                                 if expr[3] == 0 then
-                                    expr[4] = Len - expr[2] -- body length
+                                    expr[4] = Len - expr[2]
                                 end
 
                                 expr[3] += 1
@@ -2164,14 +2075,12 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 return SafeValue(Var, Pre[1])
             end
 
-            --> do the predefined stuff here!!!!!!
-
             local KeyVar, TblVar = GetContext(key), Variables[tbl]
             local _Key = key
             key = GetInternalValue(key)
 
             if not TblVar and tbl then
-                local ShouldSpy = KeyVar--false and (KeyVar or SearchTable(tbl));
+                local ShouldSpy = KeyVar;
 
                 Checked[tbl] = true
 
@@ -2194,14 +2103,14 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         local doimeowtoomuch = DefineVar(
                             Ast.Index(
                                 Ast.Variable(ResultVar),
-                                Ast.Variable(KeyVar)--ToAST(_Key)
+                                Ast.Variable(KeyVar)
                             ),
                             false,
                             true
                         )
 
                         local info = Information[_Key]
-                        if info and info.is_property or Settings.discord then --> Something like game.PlaceId, textbox.Text, ...
+                        if info and info.is_property or Settings.discord then
                             return Spy(doimeowtoomuch, tbl[key], info)
                         end
                     end
@@ -2214,28 +2123,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         end
 
         function SecureEnv.CONSTRUCT(tbl)
-            --[[local ShouldSpy = SearchTable(tbl);
-            if ShouldSpy then
-                local ResultVar = DefineVar(
-                    ToAST(tbl),
-                    false,
-                    true
-                )
-            end]]
-            --[[if #tbl ~= 1 or true then
-                for i, v in next, tbl do
-                    if GetContext(v) and not ParamsDict[v] then
-                        local ResultVar = DefineVar(
-                            ToAST(tbl),
-                            false,
-                            true
-                        )
-
-                        Variables[tbl] = ResultVar
-                        break
-                    end
-                end
-            end]]
             return tbl
         end
 
@@ -2247,7 +2134,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 if Context and typeof(v) ~= "function" then
                     local caller = debuginfo(2, "f")
                     if not iscclosure(caller) and not Variables[caller] then
-                        --> Define it as a local function, then return the values as a call result.
                         local FuncName, Stat = DefineVar(
                             ToAST(caller, { as_func = true })
                         )
@@ -2255,10 +2141,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         Variables[caller] = FuncName
                         local _, Called = AppendCall(FuncName)
                         return ToMultiVars(Called, pack(...))
-                        --[[local _, Stat = DefineVar(
-                            Ast.Function(GetParams(caller), ToAST(caller, { as_func = true }))
-                        )]]
-                        --return ToMultiVars(Stat, pack(...))
                     end
                 end
             end
@@ -2299,9 +2181,9 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         SecureEnv.CHECKEQ = EqFunc
         SecureEnv.CHECKNEQ = Eq("~=")
 
-        local HowManyChecks = 6; --> How many times a variable needs to be compared in order to log it (PROMETHEUS THING)
+        local HowManyChecks = 6;
 
-        local function NumCompare(Symbol) --> Optimized JUST for numbers
+        local function NumCompare(Symbol)
             local IsLessThan, IsGreaterThan, IsGreaterOrEqual, IsLessOrEqual = Symbol == "<", Symbol == ">", Symbol == ">=", Symbol == "<="
             local GetValue =
                 IsLessThan and
@@ -2325,7 +2207,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     local Count = CheckCount[IsMarCute]
                     CheckCount[IsMarCute] = Count + 1
 
-                    --if Count >= HowManyChecks or (Count + 1 == HowManyChecks and not Value) then
                     if Count == HowManyChecks then
                         local MarIsCute = Ast.Variable(Variable)
                         local Var = DefineVar(
@@ -2349,8 +2230,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                 if IsLessOrEqual then
                     if IsMarCute and (Information[YesSheIs] or {}).is_random and IsMarCute == 1 then
-                        --> stop spying..? (yuh)
-                        AlwaysIgnore[VarB] = true --> stop spying ts garbage
+                        AlwaysIgnore[VarB] = true
                         return GetValue(ShesEvenCuter, OrIsShe);
                     end
                 end
@@ -2368,20 +2248,10 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 local Success, Val = pcall(GetValue, ShesEvenCuter, OrIsShe)
                 if not Success then
                     assert(not Settings.roblox, Val)
-                    --Val = IsGreaterThan
 
-                    --[[
-                        x <= 100 -> false
-                        x >= 100 -> true
-                        100 <= x -> true
-                        100 >= x -> false
-                    ]]
-
-                    --print(IsMarCute, Symbol, YesSheIs, OrIsShe)
-
-                    if VarB and IsMarNumber then --> 100 <= x
+                    if VarB and IsMarNumber then
                         Val = IsLessThan or IsLessOrEqual
-                    elseif VarA and TypeShi == "number" then --> x >= 100
+                    elseif VarA and TypeShi == "number" then
                         Val = IsGreaterThan or IsGreaterOrEqual
                     end
                 end
@@ -2434,14 +2304,14 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 local IsNot = Symbol == "not"
                 local Type = Typeof(X)
 
-                if TrueEnv[Var] and Type == "function" then return Get(x) end -- lua global
+                if TrueEnv[Var] and Type == "function" then return Get(x) end
                 if not IsNot and Type == "Instance" then
                     error(`attempt to perform arithmetic (__{Symbol == "#" and "len" or "unm"}) on an Instance value`)
                 end
 
                 local Value;
 
-                if not Variables[X] or IsNot then --> #x, -x or not x
+                if not Variables[X] or IsNot then
                     local Success, Result = pcall(Get, X);
                     if Success then
                         Value = Result;
@@ -2453,7 +2323,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     if Symbol == "#" then "number"
                     elseif Symbol == "not" then "boolean"
                     else "number"
-                --> This type thing may be inaccurate, as uhhhh stuff CAN be metatables by the original script, maybe fix this later:)
                 if not hookOp then
                     return SafeValue(Var, Value);
                 end
@@ -2476,7 +2345,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
         for _, v in next, {...} do
             if Variables[v] then
-                return Spy(Var) --> No internal values.
+                return Spy(Var)
             else
                 insert(strTable, tostring(v))
             end
@@ -2488,9 +2357,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     end
 
     local SayPlease: { string } = {}
-        --> Globals that get wrapped
     local FineUgh : { string } = { "select", "newproxy" }
-        --> Globals that get replaced with their real values
 
     --! ENVIRONMENT
 
@@ -2547,9 +2414,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         local DontLogAnyways = Path == "table.pack"
         local LogPath = Path == "table.insert"
 
-	    local OutFunc = Function(function(...)
-            --print("ye",Path)
-
+        local OutFunc = Function(function(...)
             local args = {...}
             local info;
             local DoSpy, DontRun;
@@ -2563,7 +2428,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         DontRun = true
                     end
                     return Int;
-                end --^ safe
+                end
 
                 for i, v in next, tbl do
                     if DontRun then return tbl end
@@ -2609,8 +2474,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         end
                     end
 
-                    --! THIS IS UNSAFE!!
-
                     Func(unpack(args));
 
                     local Var = AppendCall(Path, ...)
@@ -2624,16 +2487,11 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 else
                     local Var, Statement = AppendCall(Path, ...)
 
-                    --> A spy argument was involved (DoSpy). If the real builtin rejects an
-                    --> env-derived nil/wrong-type (e.g. buffer.readu8(spy->nil)), that's our
-                    --> environment, not the script - recover with a spy and keep logging
-                    --> instead of truncating the whole dump. Genuine concrete-arg errors go
-                    --> through the outer branch below (no spy) and still propagate.
                     local Results = pack(pcall(Func, unpack(args)))
                     if not Results[1] then
                         local Err = tostring(Results[2])
                         if Err:find("too many operations", 1, true) or Err:find("too many iterations", 1, true) then
-                            error(Results[2]) --> op/iteration limits must propagate
+                            error(Results[2])
                         end
                         return Spy(Var)
                     end
@@ -2650,7 +2508,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             end
 
             return Func(unpack(args))
-	    end, Path, true)
+        end, Path, true)
 
         Wrapped[OutFunc] = true
 
@@ -2696,8 +2554,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             return true
         end
         
-        -- must have: 1 uppercase, 1 lowercase
-
         local Uppercase = match(Key, "[A-Z]")
         local Lowercase = match(Key, "[a-z]")
 
@@ -2705,7 +2561,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     end
 
     local function IsWeird(Key) : boolean
-        if Key == "" or typeof(Key) ~= "string" or tonumber(sub(Key, 1, 1)) then return true end -- If key == "" or the key isnt a string or the first byte is a number
+        if Key == "" or typeof(Key) ~= "string" or tonumber(sub(Key, 1, 1)) then return true end
 
         return match(Key, "[^%w_]") ~= nil or Illegal[Key]
     end
@@ -2731,7 +2587,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     local function tick(): number
         TickCalls += 1
 
-	    return startTime + (os.clock() - startClock) + (TickCalls / 1000)
+        return startTime + (os.clock() - startClock) + (TickCalls / 1000)
     end
 
     SetGarbageData({
@@ -2809,7 +2665,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         local Attributes = {}
         local Signals = {}
 
-        local ServicesCreated; --> Have the DataModel's services been loaded?
+        local ServicesCreated;
         local Gets = 0;
         local urlCache = {} :: { [string]: string };
 
@@ -2819,8 +2675,8 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             if not Settings.isPremium then return end
 
             local out = process.exec("node", {
-	            "./request.js",
-	            url
+                "./request.js",
+                url
             })
 
             local result = out.stdout
@@ -2840,7 +2696,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             Gets += 1
             Url = GetInternalValue(Url)
-            if Gets <= AllowedGetRequests and typeof(Url) == "string" then -- re-checking UrlType incase it's just a spied table
+            if Gets <= AllowedGetRequests and typeof(Url) == "string" then
                 insert(AllowedUrlsInTheEnd, Url)
 
                 local result = httpGet(Url)
@@ -3009,8 +2865,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             RealSelf.Parent = RealParent
             local SpiedParent, SpiedInstance;
 
-            if SpiedParentV1 then --> Avoid using == so __eq doesnt get triggered
-                --> this is the spied parent
+            if SpiedParentV1 then
                 SpiedParent = Parent
             else
                 for Spied, Real in next, SpiedToInstance do
@@ -3021,8 +2876,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 end
             end
 
-            if SpiedInstanceV1 then --> Avoid using == so __eq doesnt get triggered
-                --> this is the spied parent
+            if SpiedInstanceV1 then
                 SpiedInstance = Instance
             else
                 for Spied, Real in next, SpiedToInstance do
@@ -3055,12 +2909,8 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         return GenId(8)
                     end
                 elseif Category == "Class" then
-                    --return CreateInstance(Index(Name or ValueType.Name, Variable), ValueType.Name, true)
                     return CreateInstance(Name, ValueType.Name, true)
                 elseif Category == "DataType" then
-                    --[[if ValueType.Name == "Vector2" then
-                        return roblox.Vector2.new(0, 0)
-                    end]]
                     if ValueType.Name == "Instances" then
                         local Meow = DefineVar(
                             Ast.Index(
@@ -3090,7 +2940,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                 local Signal = GetMetatable(EventStr, {
                     __index = function(event, Key : string)
-                        --checktype(Key, "string", "invalid argument #2")
                         assert(event, `missing argument #1 to '{Key}' (RBXScriptSignal expected)`)
 
                         local key = if typeof(Key) == "string" then Key:lower() else Key;
@@ -3099,7 +2948,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         )
 
                         if key == "connect" or Key == "ConnectParallel" or Key == "connectParallel" or Key == "connectparallel" then
-                            --> Heartbeat.Connect
                             local Spied = Function(function(x, callback : func)
                                 checktype(callback, "function", `invalid argument #2 to '{key}'`)
 
@@ -3108,11 +2956,9 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                                 }
 
                                 if false and (EventName == "Heartbeat" or EventName == "RenderStepped") then
-                                    --Info.bypass_beautify = true
                                     Info.as_func = true
 
-                                    Explore(callback, Info) -- run it again just incase
-                                    --Explore(callback, Info) -- run it again just incase
+                                    Explore(callback, Info)
                                 end
                                 
                                 local Conn = DefineVar(
@@ -3130,7 +2976,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                                     true
                                 )
 
-                                --> return an RBXScriptConnection soon..
                                 local int = {};
                                 int.Connected = true
                                 int.Disconnect = function(self, ...)
@@ -3139,14 +2984,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                                     assert(Type == "RBXScriptConnection", "invalid argument #1 to 'Disconnect' (RBXScriptConnection expected, got " .. Type .. ")")
                                     assert(int.Connected, "Connection is not connected!")
-
-                                    --[[DefineVar(
-                                        Ast.Namecall(
-                                            Ast.Variable(Conn),
-                                            Ast.Variable("Disconnect"),
-                                            TupleToAST(...)
-                                        )
-                                    )]]
 
                                     int.Connected = false
                                 end
@@ -3160,8 +2997,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                                 return Connection
                             end, Var, true)
-                            --rawset(event, Key, Spied)
-                            --! COMMENTED, SINCE ROBLOX IS FREAKING STUPID, EVERY NEW __INDEX CREATES A NEW FUNCTION 🥹🥹🥹
                             return Spied;
                         elseif key == "wait" then
                             return Function(function(_, ...)
@@ -3216,7 +3051,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             if EnableCache then
                 for x, Real in next, SpiedToInstance do
                     if Real.ClassName == Class then
-                        return x--Spy(Variable, x)
+                        return x
                     end
                 end
             end
@@ -3258,7 +3093,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                     local Oldest = Key
                     local Prefix = Key:sub(1, 1)
-                    if IsLowerCase(Prefix:byte()) then --> Fixes issues where stuff are still accessible like .getService, this automatically converts to .GetService, .name -> Name, .placeId -> PlaceId
+                    if IsLowerCase(Prefix:byte()) then
                         Key = Prefix:upper() .. Key:sub(2)
                     end
 
@@ -3342,9 +3177,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         end
                     end
 
-                    if Class == "DataModel" and Services[Key] then --> game.Players
-                        -- check it's kids..
-                        --print("yes", Indexed, Key)
+                    if Class == "DataModel" and Services[Key] then
                         for _, v in next, Kids do
                             if SpiedToInstance[v].ClassName == Key then
                                 return v;
@@ -3364,7 +3197,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                             SetParent(Real, Instance)
 
                             return Property
-                        end --> .LocalPlayer or sum ting
+                        end
 
                         return SafeValue(
                             Indexed,
@@ -3387,7 +3220,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                             local Thing = Spy(Var)
                             if not hookOp then
                                 local Value = GenerateProperty(Method2.ReturnType, Var)
-                                SetInternalValue(Var, Value) --> have to give it actual values 💘
+                                SetInternalValue(Var, Value)
                             end
                             return Thing;
                         end, FuncName, true)
@@ -3396,7 +3229,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     local Event = Events[Key]
 
                     if Event then
-                        --> implement later
                         return CreateEvent(Self, Event.Name, Event.Parameters, Indexed)
                     elseif GlobalInstanceData.events[Key] then
                         local Spied = Spy(Indexed)
@@ -3580,13 +3412,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             local Type = Typeof(childName)
             assert(Type == "string", "invalid argument #1 to 'WaitForChild', string expected got " .. Type)
 
-            --[[if Settings.roblox then
-                return SafeValue(Self.var, nil);
-            else
-                return CreateInstance(Self.var)
-            end]]
-            --> Maybe make this actually work? (Check it's children first, then return.)
-
             local Instance = CreateInstance(Self.var)
             SpiedToInstance[Instance].Name = childName
             return Instance
@@ -3611,11 +3436,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             local Cam = Index("CurrentCamera", "workspace")
             local Camera = CreateInstance(Cam, "Camera")
 
-            --local Terr = Index("Terrain", "workspace")
-            --local Terrain = CreateInstance(Terr, "Terrain", true)
-
             SetParent(Camera, workspace)
-            --SetParent(Terrain, workspace)
         end
 
         local function Clone(Self : VariableData, Recursive : boolean?)
@@ -3810,7 +3631,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             return match(VStr, VPat, VInit)
         end,
         gmatch = function(...)
-            --print("gmatch",...)
             local args = {...}
             local DoLog, DontRun;
             for i, v in next, args do
@@ -3826,7 +3646,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             if DoLog or DontRun then
                 local Var = AppendCall("string.gmatch", ...);
-                local Success, Iterator = pcall(string.gmatch, unpack(args)) --> Always returns
+                local Success, Iterator = pcall(string.gmatch, unpack(args))
                 if not Success or DontRun then
                     return Spy(Var)
                 end
@@ -3851,7 +3671,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             end
             return string.gmatch(unpack(args))
         end,
-        pack = string.pack, --> do not wrap this, as it ruins performance.
+        pack = string.pack,
         unpack = string.unpack,
         len = function(x)
             checktype(x, "string", "invalid argument #1 to 'len'", true)
@@ -3865,11 +3685,10 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             end
             return rep(x, y);
         end,
-        --byte = string.byte
     })
 
     SecureEnv.table = HookLibrary("table", {
-        create = table.create, --> optimize
+        create = table.create,
         move = table.move
     })
 
@@ -3934,23 +3753,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             return SafeValue(Var, Date);
         end
     })
-    SecureEnv.bit32 = HookLibrary("bit32", {
-        --[[bxor = function(... : number) --> Speed up safewrap a bit
-            local AllowedToMeow, New = false, {...};
-            for i, v in next, New do
-                if Variables[v] then
-                    local Value = GetInternalValue(v)
-                    if Variables[Value] then
-                        break
-                    else
-                        New[i] = Value;
-                    end
-                end
-            end
-
-            return bit32.bxor(unpack(New));f
-        end]]
-    })
+    SecureEnv.bit32 = HookLibrary("bit32")
     SecureEnv.bit = SecureEnv.bit32
     SecureEnv.coroutine = HookLibrary("coroutine", {
         yield = Function(function(...)
@@ -3965,8 +3768,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         end, "coroutine.yield", true),
         create = coroutine.create
     })
-
-    --> Roblox Libraries
 
     SecureEnv.utf8 = HookLibrary("utf8")
     SecureEnv.buffer = HookLibrary("buffer")
@@ -4028,7 +3829,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         local Libraries = {
             "Vector2", "Vector3", "CFrame", "BrickColor", "UDim", "UDim2", "Font", "Enum", "Color3", "Ray",
             "NumberSequence", "NumberRange", "NumberSequenceKeypoint", "ColorSequence", "ColorSequenceKeypoint",
-            "RaycastParams", "PhysicalProperties", "Random", "DateTime", --> doesn't exist in roblox[RaycastParams] but it works i guess?
+            "RaycastParams", "PhysicalProperties", "Random", "DateTime",
             "Axes", "Content", "Faces", "Region3", "Region3int16", "Rect", "TweenInfo"
         }
 
@@ -4111,18 +3912,15 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                                 end
 
                                 return unpack(Spied)
-                            end, Indexed, true) --> use Indexed not Var to cache better
-                            --rawset(Self, Key, Func)
+                            end, Indexed, true)
                             return Func
                         end
 
                         local Spied = Spy(Var, Callback);
-                        --rawset(Self, Key, Spied)
                         return Spied
                     end
 
                     local Spied = Spy(Var);
-                    --rawset(Self, Key, Spied)
                     return Spied
                 end else function(Self, Key)
                     local Var = DefineVar(
@@ -4152,7 +3950,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             if Type == "table" then
                 return nil;
             elseif Type == "string" then
-                --> add later
             elseif Type == "number" or Type == "nil" or Type == "function" then
                 return nil;
             else
@@ -4242,14 +4039,12 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     SecureEnv.getfenv = function(Level)
         local Type = Typeof(Level)
         local Spoofed = SpoofedEnvs[Level]
-        --if Spoofed then return SafeValue(AppendCall("getfenv", Level), Spoofed) end
         if Spoofed then return Spoofed end
 
         if Type == "string" then
             Level = assert(tonumber(Level), `invalid argument #1 to 'getfenv' (number expected, got {Type})`)
         end
         if Type == "number" then
-            -- Is it a float?
             if Level > Nest + 2 or Level < 0 then
                 error(`invalid argument #1 to 'getfenv' (invalid level)`)
             end
@@ -4282,12 +4077,11 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
         SpoofedEnvs[a] = b;
 
-        local meow = IsInPcall or a--if typeof(a) == "number" then GetInfo(a).func else a
+        local meow = IsInPcall or a
         
         if getmetatable(b) ~= nil then
             return meow
         end
-        --return setfenv(meow, b); --! MAY BE INSECURE
     end
 
     SecureEnv.collectgarbage = function(t)
@@ -4322,13 +4116,12 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 local Alias = path:match("@([^/]+)")
                 local Thing = path:match("@.-/(%w+)")
 
-                if Alias == "game" then -- add support for @self
-                    if path == "@game" then --> thats the whole thing
+                if Alias == "game" then
+                    if path == "@game" then
                         error(Unable)
                     else
-                        --> add some dynamic instance shit
                         assert(Services[Thing], `'{Thing}' is not a valid Service name`)
-                        error(Unable) --> make it actually work
+                        error(Unable)
                     end
                 elseif Alias == "self" then
                     error(Unable)
@@ -4338,7 +4131,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             end
                 
             error(Unable)
-        elseif Type ~= "number" and (Type ~= "Instance" --[[ check if its not a ModuleScript]]) then
+        elseif Type ~= "number" and (Type ~= "Instance") then
             local Info = Information[path] or {}
             if not Info.indexed_instance then
                 Assert(Type, "Instance", `Attempted to call require with invalid argument(s).`, true)
@@ -4525,8 +4318,8 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         end
 
         local Type = typeof(func)
-        if Type ~= "function" then --! Without this, stuff break i think
-            return false, `[string "{TraceId}"]:1: attempt to call a {Type} value"`
+        if Type ~= "function" then
+            return false, `[string "{TraceId}"]:1: attempt to call a {Type} value`
         end
 
         local Logged, ReturnValues = Explore(func, {
@@ -4545,17 +4338,17 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 end
 
                 local HasArithmetic = Error:find("attempt to perform arithmetic", 0, true)
-                local RandomString = Error:find("attempt to index nil with 'randomString'", 0, true) --> xhider thing..
+                local RandomString = Error:find("attempt to index nil with 'randomString'", 0, true)
 
                 if not HasArithmetic and not RandomString then
                     ReturnValues[2] = HideErrors(Error):match("[^\n]+")
                 else
-                    local Line = (HasArithmetic and Error:find("attempt to perform arithmetic (unm)", 0, true)) and "1" or "%2" --> wearedevs garbage
+                    local Line = (HasArithmetic and Error:find("attempt to perform arithmetic (unm)", 0, true)) and "1" or "%2"
                     ReturnValues[2] = Error:gsub(UserRegex, `[string "{TraceId}"]:{Line}`)
                 end
 
                 ReturnValues[2] = ReturnValues[2]:gsub("luau%.load%(%.%.%.%)", TraceId)
-                if startswith(ReturnValues[2], "terrain:") then --> stuff like 'Unsupported terrain material'
+                if startswith(ReturnValues[2], "terrain:") then
                     ReturnValues[2] = ReturnValues[2]:match("terrain:%d*:%s*(.+)")
                 end
             end
@@ -4567,7 +4360,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         if Len ~= 0 and (Len ~= 1 or Statements[Len].kind ~= "return") and ReturnValues.n <= 10 then
             local Last = Statements[Len]
             if Last and Last.kind == "assign" and Last.data.values[1].kind == "string" then
-                --> pcall(function() local str ="hello" end)
                 Ast.addStatement(AST, Last)
                 return unpack(ReturnValues)
             end
@@ -4656,8 +4448,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             print("meow?",tbl,k)
             local Var = AppendCall("rawget", tbl, k)
 
-            --return tbl[k]
-            --return SafeValue(Var, rawget(GetInternalValue(tbl), k));
             local value = rawget(GetInternalValue(tbl), k)
             return SafeValue(Var, value);
         end
@@ -4698,11 +4488,11 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         Returned.func = i
 
         local RealC = CClosures[i] or s == "[C]"
-        local True = TrueEnv[Variables[i]] -- TrueEnv[getmetatable]
+        local True = TrueEnv[Variables[i]]
 
         if True then RealC = RealC or iscclosure(True) end
 
-        if RealC then -- A C Closure
+        if RealC then
             Returned.what = "C"
             Returned.namewhat = ""
             Returned.source = "=[C]"
@@ -4720,7 +4510,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             if typeof(i) == "number" then
                 local CallStackNumbers = {}
                 local Traceback = split(debug.traceback(), "\n")
-                local String = `[string "{TraceId}"]`--"[string \"luau.load(...)\"]"
+                local String = `[string "{TraceId}"]`
                 local Len = #String
 
                 for x = 1, #Traceback do
@@ -4755,7 +4545,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                 if true then return nil end
 
-                -- Main Env
                 Returned.source, Returned.short_src = TraceId, TraceId
                 Returned.name = ""
                 Returned.func = debuginfo(2, "f")
@@ -4767,7 +4556,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 Returned.what = "Lua";
                 Returned.line, Returned.linedefined, Returned.currentline = l, l, l;
                 Returned.source, Returned.short_src = TraceId, TraceId:sub(1, -2);
-                Returned.nups = 0; --> You can do this when getupvalues is implemented
+                Returned.nups = 0;
                 Returned.is_vararg, Returned.numparams = vararg and 1 or 0, params;
             end
         end
@@ -4777,7 +4566,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
     local function Getupvalues(Func : func | number, Name : string)
         if typeof(Func) == "function" and iscclosure(Func) then
-            --error(`{Name} cannot be called on a C closure!`)
         end
     end
 
@@ -4805,9 +4593,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             info = Function(function(...)
                 local Raw = pack(...)
 
-                --> Roblox debug.info has a 3-arg thread form: debug.info(thread, level, options).
-                --> In that form arg#2 is the numeric level and the options string is arg#3, so the
-                --> plain (t, i) shape wrongly rejected the level as "string expected got number".
                 local ThreadForm = Raw.n >= 3 and Typeof(Raw[1]) == "thread"
                 local t = GetInternalValue(if ThreadForm then Raw[2] else Raw[1]);
                 local i = GetInternalValue(if ThreadForm then Raw[3] else Raw[2]);
@@ -4894,7 +4679,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                     if HideErrors(v) == v then
                         insert(out, v)
                     end
-                end --> covering my traces:)
+                end
 
                 local value = concat(out, "\n")
                 value = gsub(value, ":%d+", ":1"):gsub("%[string [\"'](.-)[\"']%]", "%1")
@@ -4927,13 +4712,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
                 return Spy(Meower, nil, { is_propery = true })
             end, "debug.getlocal", true),
-            --[[getupvalues = Function(function(func : func | number)
-                AppendCall("debug.getupvalues", func)
-
-                local Type = Typeof(func)
-                assert(Type == "function" or Type == "number", `invalid argument #1 to 'getupvalues', function or number expected got {Type}`)
-                return Getupvalues(func, "getupvalues")
-            end, "debug.getupvalues", true),]]
             getupvalue = Function(function(func : func | number, idx : number)
                 local Upvalue = AppendCall("debug.getupvalue", func)
 
@@ -4943,7 +4721,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 if iscclosure(func) then error(`'getupvalue' cannot be called on a CClosure!`) end
                 if idx <= 0 then error(`invalid argument #2 to 'getupvalue' (invalid index!)`) end
 
-                return Spy(Upvalue, nil, { is_propery = true })--(Getupvalues(func, "getupvalue") or {})[1]
+                return Spy(Upvalue, nil, { is_propery = true })
             end, "debug.getupvalue", true)
         }
     })
@@ -5029,7 +4807,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         if env then return env end;
         
         if path == "_G" or path == "shared" then
-            --> do it the solara way
             local Meower = CreateEnv("getgenv()")
             local EnvVar = Ast.Variable(path);
 
@@ -5074,7 +4851,6 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 
                 if Value then
                     local X = Value[1]
-                    --if typeof(X) == "function" then return X end;
                     return SafeValue(Var, X)
                 end
 
@@ -5109,7 +4885,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                 
                 EnvValues[Key] = { Value }
             end,
-            __metatable = "Protected" -- Solara's implementation
+            __metatable = "Protected"
         })
         return Metatable;
     end
@@ -5210,11 +4986,10 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         end
 
         local IgnoreMar = DoIgnore(Key)
-        local Casper = IgnoreMar or -- Detected as junk
-            --(Type == "string") or-- and #Key == 2) or -- Moonveil
+        local Casper = IgnoreMar or
             (Type == "string" and (#Key == 13 and Key:find("%d"))) or
-            Type == "function" or -- fenv[debug.getinfo] or something
-            Type == "nil" or -- fenv[nil]
+            Type == "function" or
+            Type == "nil" or
             (SpyExecOnly and not ExecType)
 
         if Key and not meowed[Key] then
@@ -5236,9 +5011,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
             Indexes[ToUse] = true
         end
 
-        if
-            Casper -- spyexeconly is on & it's not an exec func
-        then
+        if Casper then
             ToUse = ToUse or meowed[Key];
             if not hookOp then
                 return nil;
@@ -5314,7 +5087,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
                         bypass_beautify = true
                     })
 
-                    if OldLen ~= VariablesLen then --> New variables added, we don't wanna miss out on them.
+                    if OldLen ~= VariablesLen then
                         for _, stat in next, Logged.data.statements do
                             if stat.kind ~= "return" then
                                 Ast.addStatement(AST, stat)
@@ -5432,7 +5205,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     StartedRunning = os.time()
     SharedGlobals.StartedRunning = StartedRunning
 
-    local Values = pack(pcall(Function)); --! add args
+    local Values = pack(pcall(Function));
     CloseAllEnds()
 
     if not Values[1] then
@@ -5475,16 +5248,14 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
         end
     end
 
-    table.sort(ToExplore, function(a, b) -- a < b
+    table.sort(ToExplore, function(a, b)
         local DelayA, DelayB = a.args.delay, b.args.delay
         local DeferredA, DeferredB = a.args.deferred, b.args.deferred
     
-        -- Handle deferred tasks: deferred items come after non-deferred
         if DeferredA ~= DeferredB then
-            return not DeferredA -- non-deferred (false) < deferred (true)
+            return not DeferredA
         end
     
-        -- Both deferred or both not deferred
         if not DelayA and not DelayB then
             return a.idx < b.idx
         else
@@ -5493,8 +5264,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
     end)
 
     local function Iterate()
-        yoiterate = true
-        for _, Data in next, ToExplore do
+        for i, Data in ipairs(ToExplore) do
             if Beautified[Data] then continue end
 
             local Function, Id, Node, Args = Data.func, Data.id, Data.node, Data.args
@@ -5507,8 +5277,9 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             table.clear(Node)
 
-            for i, v in next, Explored do -- Copy everything from the function to here
-                Node[i] = v
+            -- Copy everything from the function to here
+            for j, v in ipairs(Explored) do
+                Node[j] = v
             end
         end
     end
@@ -5521,25 +5292,13 @@ end
 local LURAPH_MARKER = "does your environment support load/loadstring?"
 
 local function DecompressLuraph(Code : string, Depth : number?) : string?
-    --[[
-        Luraph's "compressed" output is a small bootstrap that decompresses the
-        real VM source into a string, then runs it via loadstring()/load().
-        Our env hooks loadstring (it spies instead of really compiling), so the
-        decompression corrupts and the script dies with "table overflow".
-
-        Fix (notes.md: "if luraph isn't working, make sure loadstring & setfenv are"
-        + "Added automatic luraph decompression"): run the bootstrap in a CLEAN
-        sandbox with a real string env, but replace load/loadstring with a capture
-        hook. The bootstrap hands us the decompressed source as a plain string; we
-        grab the largest valid Luau chunk and hand THAT to EnvLog instead.
-    ]]
     Depth = Depth or 0
-    if Depth > 4 then return nil end --> guard against pathological nesting
+    if Depth > 4 then return nil end
 
     local Captured = {}
     local function Capture(chunk : any)
         if typeof(chunk) == "string" then insert(Captured, chunk) end
-        return function() end --> pretend the load succeeded so the bootstrap continues
+        return function() end
     end
 
     local Sandbox = fenv.setmetatable({
@@ -5550,12 +5309,12 @@ local function DecompressLuraph(Code : string, Depth : number?) : string?
     local Loaded = loadstring(Code, { debugName = "luraph_decompress" })
     if not Loaded then return nil end
 
-    pcall(fenv.setfenv(Loaded, Sandbox)) --> errors here are fine, we only want the captured payload
+    pcall(fenv.setfenv(Loaded, Sandbox))
 
     local Best, BestLen = nil, 0
     for _, chunk in next, Captured do
         if #chunk > BestLen then
-            local Ok, Compiled = pcall(compile, chunk) --> only keep chunks that are real Luau
+            local Ok, Compiled = pcall(compile, chunk)
             if Ok and Compiled then
                 Best, BestLen = chunk, #chunk
             end
@@ -5564,7 +5323,6 @@ local function DecompressLuraph(Code : string, Depth : number?) : string?
 
     if not Best then return nil end
 
-    --> Luraph can stack compression layers; peel them until we hit real source.
     if Best:find(LURAPH_MARKER, 1, true) then
         return DecompressLuraph(Best, Depth + 1) or Best
     end
@@ -5578,7 +5336,7 @@ local function TimedDump(File : string, RawContent : boolean?)
     local Code : string = RawContent and File or fs.readFile("./" .. File);
     local Source = Code;
 
-    local HookFile = if RawContent then nil else File --> file hookOp reads from; nil = write Code to a temp
+    local HookFile = if RawContent then nil else File
 
     if Code:find(LURAPH_MARKER, 1, true) then
         local Decompressed = DecompressLuraph(Code)
@@ -5586,7 +5344,7 @@ local function TimedDump(File : string, RawContent : boolean?)
             print(format("Luraph compressed payload detected; decompressed %d -> %d bytes", #Code, #Decompressed))
             Code = Decompressed
             Source = Decompressed
-            HookFile = nil --> Code no longer matches File on disk, so hookOp must read our decompressed copy
+            HookFile = nil
         else
             warn("Luraph decompression failed; running compressed bootstrap directly")
         end
@@ -5594,7 +5352,7 @@ local function TimedDump(File : string, RawContent : boolean?)
 
     local A, B, C, D = Code:byte(1, 4);
     local IsBytecode = false;
-    if A == 6 and B == 3 and C == 159 and D == 1 then --> Luau bytecode!
+    if A == 6 and B == 3 and C == 159 and D == 1 then
         IsBytecode = true
     end
 
@@ -5612,7 +5370,7 @@ local function TimedDump(File : string, RawContent : boolean?)
         end
     end
 
-    if Settings.version and not RawContent then --> from bot
+    if Settings.version and not RawContent then
         fs.removeFile(File);
     end
 
@@ -5625,7 +5383,6 @@ local function TimedDump(File : string, RawContent : boolean?)
     AstLib.SetGlobal("comments", Settings.comments)
 
     local Start = os.clock()
-    --LURAPH_COMPRESSED = Code:find("(does your environment support load/loadstring?", 0, true) and Code:find("Luraph decompression error: ", 0, true)
     local Multiplier = (1 + #Code / (200 * 1024))
     WHILE_LIMIT *= Multiplier
     MAX_OPS_MUL = Multiplier
@@ -5682,7 +5439,7 @@ local function TimedDump(File : string, RawContent : boolean?)
     process.exit(0);
 end
 
-if Settings.ipt then --> Spawned instantly, for beta testing or whatever.
+if Settings.ipt then
     return TimedDump(Settings.ipt or "input.lua");
 end
 
