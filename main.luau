@@ -21,7 +21,7 @@ type AstExpression = TypesLib.AstExpression
 type AstBlock = TypesLib.AstBlock
 type Spied = TypesLib.Spied
 type Variable = string
-type func = (...any) -> ...any
+type func = (...any) -> any
 type dict = { [any]: any }
 type array = { any }
 type tbl = dict | array
@@ -2501,7 +2501,7 @@ local function EnvLog(Source : (any) -> any, Nest : number) : AstExpression
 
             local Variable = GetContext(Value)
             if Variable and not IgnoreInEq[Variable] and Type ~= "function" then
-                return SafeValue((AppendCall(Name, Value)), Type);
+                return SafeValue((AppendCall(Name, Value)), Type)
             end
             return Type;
         end, Name, true)
