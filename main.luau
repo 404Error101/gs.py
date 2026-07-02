@@ -64,7 +64,7 @@ local MAX_OPS_MUL = 1;
 
 local Instance = roblox.Instance
 
-local ExecutorEnvironment = require("./env/exec")
+local ExecutorEnvironment = require("./env/Exec")
 local RandomLib = require("./env/random")
 local DateTime = require("./env/datetime")
 local InstanceLib, InstanceFuncs = unpack(require("./env/instances"))
