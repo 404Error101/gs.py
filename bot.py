@@ -14,7 +14,7 @@ import http.server
 TOKEN = os.environ.get("DISCORD_TOKEN")
 CHANNEL_ID = 1520270151961018519
 PREFIX = ".l"
-TIMEOUT = 100
+TIMEOUT = 120
 MAX_DL = 8 * 1024 * 1024
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -37,6 +37,10 @@ def _kill_tree(pid: int):
 def _dump_blocking(in_rel: str, out_rel: str):
     env = os.environ.copy()
     env["HOOKOP_BIN"] = str(LUTE)
+    # Help with obfuscated scripts
+    env["LUTE_MAX_STEPS"] = "5000000"
+    env["LUTE_MAX_DEPTH"] = "200"
+
     started = time.perf_counter()
     proc = subprocess.Popen(
         ["lune", "run", "main.luau", in_rel, f"out={out_rel}"],
@@ -52,19 +56,28 @@ def _dump_blocking(in_rel: str, out_rel: str):
             proc.communicate(timeout=5)
         except Exception:
             pass
-        return False, "timeout", TIMEOUT
+        return False, "timeout (complex obfuscation)", TIMEOUT
+
     took = time.perf_counter() - started
     m = TIME_RE.search(log or "")
     if m:
         took = float(m.group(1))
+
     out_path = ROOT / out_rel
     if proc.returncode != 0 or not out_path.exists():
-        tail = (log or "").strip().splitlines()[-1:] or ["unknown error"]
-        return False, tail[-1][:300], took
+        tail = (log or "").strip().splitlines()[-10:] or ["unknown error"]
+        error_msg = "\n".join(tail)[-400:]
+        if "Stack End" in log or "stack overflow" in log.lower():
+            return False, "stack overflow - too heavily obfuscated", took
+        return False, error_msg, took
+
     head = out_path.read_text(errors="ignore")[:6]
     if head.startswith("--err"):
         reason = out_path.read_text(errors="ignore")[5:].strip()
-        return False, reason[:300] or "engine error", took
+        if "stack" in reason.lower():
+            return False, "stack overflow - too heavily obfuscated", took
+        return False, reason[:400] or "engine error", took
+
     return True, None, took
 
 intents = discord.Intents.default()
@@ -148,13 +161,14 @@ async def worker():
                 await unreact(message, "⏳")
                 await react(message, "✅")
             else:
-                label = "skipped — took over 100s" if reason == "timeout" else reason
-                e = discord.Embed(color=WARN if reason == "timeout" else BAD, timestamp=datetime.now())
+                label = reason
+                color = WARN if "timeout" in reason or "obfuscated" in reason else BAD
+                e = discord.Embed(color=color, timestamp=datetime.now())
                 e.description = f"**`{name}`**\n{label}"
                 e.set_footer(text="99ms")
                 await message.reply(content=message.author.mention, embed=e, mention_author=True)
                 await unreact(message, "⏳")
-                await react(message, "⏱️" if reason == "timeout" else "❌")
+                await react(message, "⏱️" if "timeout" in reason else "❌")
         except Exception as ex:
             e = discord.Embed(color=BAD, timestamp=datetime.now())
             e.description = f"**`{name}`**\ncouldn't grab that — {ex}"
