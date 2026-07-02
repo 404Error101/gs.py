@@ -5,11 +5,11 @@ import time
 import pathlib
 import subprocess
 import threading
-import http.server
-import socketserver
 from datetime import datetime
 import aiohttp
 import discord
+import socketserver
+import http.server
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
 CHANNEL_ID = 1520270151961018519
@@ -72,7 +72,7 @@ intents.message_content = True
 bot = discord.Client(intents=intents)
 
 queue: "asyncio.Queue[dict]" = asyncio.Queue()
-http: aiohttp.ClientSession | None = None
+http_session: aiohttp.ClientSession | None = None
 
 async def react(msg, emoji):
     try:
@@ -111,7 +111,7 @@ async def gather_jobs(message) -> list[dict]:
 async def fetch_source(job) -> str:
     if job["att"] is not None:
         return (await job["att"].read()).decode("utf-8", "ignore")
-    async with http.get(job["url"], timeout=aiohttp.ClientTimeout(total=30)) as r:
+    async with http_session.get(job["url"], timeout=aiohttp.ClientTimeout(total=30)) as r:
         r.raise_for_status()
         chunks, total = [], 0
         async for part in r.content.iter_chunked(65536):
@@ -175,9 +175,9 @@ async def worker():
 
 @bot.event
 async def on_ready():
-    global http
-    if http is None:
-        http = aiohttp.ClientSession()
+    global http_session
+    if http_session is None:
+        http_session = aiohttp.ClientSession()
     bot.loop.create_task(worker())
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{PREFIX} · envlogger"))
     print(f"online as {bot.user} · channel {CHANNEL_ID}")
@@ -207,20 +207,19 @@ async def on_message(message):
         except discord.HTTPException:
             pass
 
-class KeepAliveHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is alive")
-
-def run_keep_alive():
-    PORT = 8080
-    with socketserver.TCPServer(("", PORT), KeepAliveHandler) as httpd:
-        print(f"Keep-alive server running on port {PORT}")
+def keep_alive():
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Bot is alive")
+    with socketserver.TCPServer(("", 8080), Handler) as httpd:
+        print("Keep-alive server running on port 8080")
         httpd.serve_forever()
 
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("DISCORD_TOKEN environment variable is not set!")
-    threading.Thread(target=run_keep_alive, daemon=True).start()
+    threading.Thread(target=keep_alive, daemon=True).start()
     bot.run(TOKEN)
