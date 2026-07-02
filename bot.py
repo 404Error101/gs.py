@@ -7,6 +7,8 @@ import subprocess
 from datetime import datetime
 import aiohttp
 import discord
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = 1520270151961018519
@@ -58,6 +60,16 @@ def _dump_blocking(in_rel: str, out_rel: str):
         reason = out_path.read_text(errors="ignore")[5:].strip()
         return False, reason[:300] or "engine error", took
     return True, None, took
+
+class KeepAliveHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+def keep_alive():
+    server = HTTPServer(('0.0.0.0', 8080), KeepAliveHandler)
+    server.serve_forever()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -206,4 +218,6 @@ async def on_message(message):
         except discord.HTTPException: pass
 
 if __name__ == "__main__":
+    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    keep_alive_thread.start()
     bot.run(TOKEN)
