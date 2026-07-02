@@ -151,7 +151,7 @@ local SharedGlobals = {
 }
 
 local Settings = {
-    hookOp = true,
+    hookOp = false,
     minifier = true,
     explore_funcs = true,
     lua = false,
