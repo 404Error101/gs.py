@@ -1,6 +1,17 @@
 -- ===== @std ALIAS FIX =====
 local function setupStdAlias()
-    package.path = "./std/?.lua;./std/syntax/?.lua;" .. package.path
+    if not _G.package then
+        _G.package = {
+            path = "",
+            cpath = "",
+            loaded = {},
+            preload = {},
+            config = "",
+            loaders = {}
+        }
+    end
+    
+    package.path = "./std/?.lua;./std/syntax/?.lua;" .. (package.path or "")
     
     local oldRequire = require
     _G.require = function(module)
@@ -15,7 +26,7 @@ end
 setupStdAlias()
 -- ===== END FIX =====
 
--- YOUR ORIGINAL CODE - COMPLETELY UNCHANGED FROM HERE
+-- YOUR ORIGINAL CODE - COMPLETELY UNCHANGED
 local parser = require("@std/syntax/parser")
 local fs = require("@std/fs")
 
@@ -766,6 +777,7 @@ function unparser:readexpr(statement, args)
     error("unsupported expression '" .. (statement.tag or "???") .. "'")
 end
 
+-- ===== RUN HOOKOP =====
 local args = { ... }
 
 local input = args[2]
