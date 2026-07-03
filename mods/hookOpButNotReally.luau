@@ -1,3 +1,21 @@
+-- ===== @std ALIAS FIX =====
+local function setupStdAlias()
+    package.path = "./std/?.lua;./std/syntax/?.lua;" .. package.path
+    
+    local oldRequire = require
+    _G.require = function(module)
+        if type(module) == "string" and module:match("^@std/") then
+            local fixed = module:gsub("^@std/", "")
+            return oldRequire(fixed)
+        end
+        return oldRequire(module)
+    end
+end
+
+setupStdAlias()
+-- ===== END FIX =====
+
+-- YOUR ORIGINAL CODE - COMPLETELY UNCHANGED FROM HERE
 local parser = require("@std/syntax/parser")
 local fs = require("@std/fs")
 
