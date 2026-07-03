@@ -19,8 +19,7 @@ TIMEOUT = 180
 MAX_DL = 8 * 1024 * 1024
 
 ROOT = pathlib.Path(__file__).resolve().parent
-# Use the correct binary name for Linux
-LUNE = ROOT / "lune"  # or just "lune" if in PATH
+LUNE = ROOT / "lune"
 TMP = ROOT / "bot_tmp"
 TMP.mkdir(exist_ok=True)
 
@@ -34,7 +33,6 @@ TIME_RE = re.compile(r"Finished processing in ([\d.]+) seconds", re.I)
 OK_EXT = (".lua", ".txt")
 
 def _kill_tree(pid: int):
-    """Kill process tree for Linux"""
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
     except (ProcessLookupError, OSError):
@@ -46,29 +44,27 @@ def _kill_tree(pid: int):
 
 def _dump_blocking(in_rel: str, out_rel: str):
     env = os.environ.copy()
-    # Use Lune with the correct environment variables
     env["HOOKOP_USE_LUNE"] = "1"
     env["HOOKOP_BIN"] = "lune"
     env["LUNE_MAX_STEPS"] = "15000000"
     env["LUNE_MAX_DEPTH"] = "600"
-    
+   
     started = time.perf_counter()
-    
-    # Check if lune is available
+   
     lune_path = ROOT / "lune"
     if not lune_path.exists():
         lune_path = "/usr/bin/lune"
-    
+   
     proc = subprocess.Popen(
         ["lune", "run", "main.luau", in_rel, f"out={out_rel}"],
-        cwd=str(ROOT), 
+        cwd=str(ROOT),
         env=env,
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.STDOUT, 
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
     )
-    
+   
     try:
         log, _ = proc.communicate(timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -78,23 +74,23 @@ def _dump_blocking(in_rel: str, out_rel: str):
         except Exception:
             pass
         return False, "timeout", TIMEOUT
-    
+   
     took = time.perf_counter() - started
     m = TIME_RE.search(log or "")
     if m:
         took = float(m.group(1))
-    
+   
     out_path = ROOT / out_rel
     if proc.returncode != 0 or not out_path.exists():
         tail = (log or "").strip().splitlines()[-10:] or ["unknown error"]
         error_msg = "\n".join(tail)[-400:]
         return False, error_msg, took
-    
+   
     head = out_path.read_text(errors="ignore")[:6]
     if head.startswith("--err"):
         reason = out_path.read_text(errors="ignore")[5:].strip()
         return False, reason[:400] or "engine error", took
-    
+   
     return True, None, took
 
 intents = discord.Intents.default()
@@ -151,6 +147,39 @@ async def fetch_source(job) -> str:
             chunks.append(part)
         return b"".join(chunks).decode("utf-8", "ignore")
 
+async def upload_to_pastefy(content: str, name: str) -> str:
+    try:
+        payload = {
+            "title": name,
+            "content": content,
+            "visibility": "PUBLIC"
+        }
+        
+        async with http_session.post(
+            "https://pastefy.app/api/v2/paste",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=aiohttp.ClientTimeout(total=20)
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                paste_id = data.get("paste", {}).get("id") or data.get("id")
+                if paste_id:
+                    return f"https://pastefy.app/{paste_id}/raw"
+    except Exception:
+        pass
+    return None
+
+def clean_output(data: str) -> str:
+    error_pattern = r'print"Unable to load hookOp on this file, this file ran as it would without hookOp\. Reason: --err/app/mods/attempt to index nil with \'path\'\n\[Stack Begin\]\n Script \'/app/mods/hookOpButNotReally\', Line 14\n Script \'/app/mods/hookOpButNotReally\', Line 26\n\[Stack End\]\n\n";'
+    data = re.sub(error_pattern, '', data, flags=re.DOTALL)
+    
+    header = "--this file was dumped by 99ms https://discord.gg/A6VZHzZ6n\n"
+    if not data.startswith(header.strip()):
+        data = header + data
+    
+    return data
+
 async def worker():
     await bot.wait_until_ready()
     while True:
@@ -160,29 +189,40 @@ async def worker():
         in_rel = f"bot_tmp/{stamp}.lua"
         out_rel = f"bot_tmp/{stamp}_out.lua"
         in_path, out_path = ROOT / in_rel, ROOT / out_rel
-        
+       
         await unreact(message, "🕓")
         await react(message, "⏳")
-        
+       
         try:
             src = await fetch_source(job)
             in_path.write_text(src, encoding="utf-8", errors="ignore")
             ok, reason, took = await asyncio.to_thread(_dump_blocking, in_rel, out_rel)
-            
+           
             if ok:
                 data = out_path.read_text(errors="ignore")
+                data = clean_output(data)
+                
+                out_path.write_text(data, encoding="utf-8", errors="ignore")
+                
                 lines = data.count("\n") + 1
                 e = discord.Embed(color=GOOD, timestamp=datetime.now())
                 e.description = f"**`{name}`**\n`{lines:,} lines` · `{len(data)/1024:.1f} KB` · `{took:.2f}s`"
                 e.set_footer(text="99ms")
                 out_name = re.sub(r"\.(lua|txt)$", "", name, flags=re.I) + ".dump.lua"
-                with open(out_path, "rb") as fh:
-                    await message.reply(
-                        content=message.author.mention, 
-                        embed=e, 
-                        file=discord.File(fh, filename=out_name),
-                        mention_author=True
-                    )
+                
+                raw_link = await upload_to_pastefy(data, out_name)
+                
+                files = [discord.File(out_path, filename=out_name)]
+                content = message.author.mention
+                if raw_link:
+                    content += f"\nRaw: {raw_link}"
+                
+                await message.reply(
+                    content=content,
+                    embed=e,
+                    files=files,
+                    mention_author=True
+                )
                 await unreact(message, "⏳")
                 await react(message, "✅")
             else:
@@ -194,7 +234,7 @@ async def worker():
                 await message.reply(content=message.author.mention, embed=e, mention_author=True)
                 await unreact(message, "⏳")
                 await react(message, "⏱️" if "timeout" in label.lower() else "❌")
-                
+               
         except Exception as ex:
             e = discord.Embed(color=BAD, timestamp=datetime.now())
             e.description = f"**`{name}`**\ncouldn't process — {ex}"
@@ -205,7 +245,7 @@ async def worker():
                 pass
             await unreact(message, "⏳")
             await react(message, "❌")
-            
+           
         finally:
             for p in (in_path, out_path):
                 try:
@@ -235,7 +275,7 @@ async def on_message(message):
     content = message.content.strip()
     if not (content == PREFIX or content.lower().startswith(PREFIX + " ") or content.lower().startswith(PREFIX + "\n")):
         return
-    
+   
     jobs = await gather_jobs(message)
     if not jobs:
         e = discord.Embed(
@@ -245,13 +285,13 @@ async def on_message(message):
         e.set_footer(text="99ms")
         await message.reply(embed=e, mention_author=False)
         return
-    
+   
     await react(message, "🕓")
     pos = queue.qsize()
     for j in jobs:
         j["message"] = message
         await queue.put(j)
-    
+   
     if pos or len(jobs) > 1:
         note = f"queued `{len(jobs)}` · `{pos}` ahead" if pos else f"queued `{len(jobs)}`"
         try:
@@ -273,13 +313,12 @@ def keep_alive():
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("DISCORD_TOKEN environment variable is not set!")
-    
-    # Verify lune exists
+   
     lune_path = ROOT / "lune"
     if not lune_path.exists():
         lune_path = pathlib.Path("/usr/bin/lune")
         if not lune_path.exists():
             print("WARNING: lune binary not found! Make sure it's installed.")
-    
+   
     threading.Thread(target=keep_alive, daemon=True).start()
     bot.run(TOKEN)
