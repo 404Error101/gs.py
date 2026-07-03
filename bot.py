@@ -171,14 +171,25 @@ async def upload_to_pastefy(content: str, name: str) -> str:
     return None
 
 def clean_output(data: str) -> str:
-    error_pattern = r'print"Unable to load hookOp on this file, this file ran as it would without hookOp\. Reason: --err/app/mods/attempt to index nil with \'path\'\n\[Stack Begin\]\n Script \'/app/mods/hookOpButNotReally\', Line 14\n Script \'/app/mods/hookOpButNotReally\', Line 26\n\[Stack End\]\n\n";'
-    data = re.sub(error_pattern, '', data, flags=re.DOTALL)
+    # Improved robust stripping for the hookOp error
+    error_patterns = [
+        r'print"Unable to load hookOp on this file.*?Reason: --err/app/mods/attempt to index nil with \'path\'.*?\[Stack End\]\n\n";?',
+        r'Unable to load hookOp on this file.*?hookOpButNotReally.*?Line 26',
+    ]
     
+    for pattern in error_patterns:
+        data = re.sub(pattern, '', data, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Remove any leftover empty print statements or extra newlines
+    data = re.sub(r'print""\s*;', '', data)
+    data = re.sub(r'\n\s*\n\s*\n', '\n\n', data)
+    
+    # Add header
     header = "--this file was dumped by 99ms https://discord.gg/A6VZHzZ6n\n"
-    if not data.startswith(header.strip()):
-        data = header + data
+    if not data.lstrip().startswith(header.strip()):
+        data = header + data.lstrip()
     
-    return data
+    return data.strip() + "\n"
 
 async def worker():
     await bot.wait_until_ready()
@@ -263,7 +274,7 @@ async def on_ready():
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name=f"{PREFIX} · envlogger"
+            name=f"{PREFIX} · dump"
         )
     )
     print(f"online as {bot.user} · channel {CHANNEL_ID}")
